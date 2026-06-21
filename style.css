@@ -1,0 +1,222 @@
+/* font imports — JetBrains Mono because everything here is basically a debug readout anyway */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Space+Grotesk:wght@500;700&display=swap');
+
+:root{
+  --bg: #0b0e0d;
+  --bg-panel: #11403d0d;
+  --panel: #11151414;
+  --line: #1f2825;
+  --line-bright: #2c3a36;
+  --text: #e8efec;
+  --text-dim: #7c8d88;
+  --accent: #5dffc4;
+  --accent-dim: #2f8f6f;
+  --warn: #ff6b5e;
+
+  --bot-body: #d8ded9;
+  --bot-panel: #1c2624;
+  --bot-eye: #0b0e0d;
+  --bot-eye-glow: var(--accent);
+  --bot-dark: #9aa6a1;
+  --bot-shoe: #6b7672;
+
+  --mono: 'JetBrains Mono', monospace;
+  --display: 'Space Grotesk', sans-serif;
+}
+
+*{ box-sizing: border-box; margin:0; padding:0; }
+
+body{
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+}
+
+.grid-bg{
+  position: fixed; inset: 0;
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 42px 42px;
+  opacity: 0.35;
+  pointer-events: none;
+  mask-image: radial-gradient(ellipse at 50% 0%, black 0%, transparent 75%);
+}
+
+/* ---------- topbar ---------- */
+.topbar{
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 20px 32px;
+  border-bottom: 1px solid var(--line);
+  position: relative; z-index: 2;
+}
+.brand{ display:flex; align-items:center; gap:10px; font-family: var(--display); font-weight:700; letter-spacing: 0.12em; }
+.brand-mark{ color: var(--accent); font-size: 1.2rem; }
+.brand-name{ font-size: 0.95rem; }
+
+.status{ display:flex; align-items:center; gap:8px; font-size: 0.72rem; letter-spacing: 0.08em; color: var(--text-dim); text-transform: uppercase; }
+.status-dot{ width:7px; height:7px; border-radius:50%; background: var(--text-dim); transition: background .3s; }
+.status-dot.ready{ background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.status-dot.error{ background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+
+/* ---------- layout ---------- */
+.layout{
+  display:grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 1px;
+  background: var(--line);
+  position: relative; z-index: 2;
+  min-height: calc(100vh - 130px);
+}
+@media (max-width: 920px){
+  .layout{ grid-template-columns: 1fr; }
+}
+
+.panel{
+  background: var(--bg);
+  padding: 28px;
+  display:flex; flex-direction:column; gap: 18px;
+}
+.panel-label{
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+/* ---------- video stage ---------- */
+.stage{
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4/3;
+  background: #070908;
+  border: 1px solid var(--line-bright);
+  border-radius: 4px;
+  overflow: hidden;
+}
+#video{
+  position:absolute; inset:0;
+  width:100%; height:100%;
+  object-fit: contain;
+  background:#070908;
+}
+#overlay{
+  position:absolute; inset:0;
+  width:100%; height:100%;
+  pointer-events: none;
+}
+
+.dropzone{
+  position:absolute; inset:0;
+  display:flex; align-items:center; justify-content:center;
+  background: #070908;
+  border: 1px dashed var(--line-bright);
+  cursor:pointer;
+  transition: border-color .2s, background .2s;
+}
+.dropzone.dragover{ border-color: var(--accent); background: #0c1a16; }
+.dropzone.hidden{ display:none; }
+.dz-inner{ text-align:center; color: var(--text-dim); padding: 20px; }
+.dz-icon{ font-size: 1.8rem; color: var(--accent-dim); margin-bottom: 10px; }
+.dz-title{ color: var(--text); font-family: var(--display); font-weight:700; font-size: 1rem; margin-bottom: 6px; }
+.dz-sub{ font-size: 0.75rem; }
+
+/* ---------- controls ---------- */
+.controls{ display:flex; gap: 10px; flex-wrap: wrap; }
+.btn{
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  padding: 10px 16px;
+  border-radius: 3px;
+  border: 1px solid var(--accent-dim);
+  background: var(--accent);
+  color: #06120d;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform .12s, opacity .2s;
+}
+.btn:hover:not(:disabled){ transform: translateY(-1px); }
+.btn:disabled{ opacity: 0.35; cursor: not-allowed; }
+.btn-ghost{
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line-bright);
+  font-weight: 500;
+}
+.file-btn{ display:inline-flex; align-items:center; }
+
+/* ---------- calibration ---------- */
+.calibration{
+  border-top: 1px dashed var(--line-bright);
+  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.calibration-label{
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.calibration-controls{ display:flex; gap: 10px; flex-wrap: wrap; }
+.calibration-controls .btn span{ color: var(--accent); font-weight: 700; margin-left: 4px; }
+
+/* ---------- world / bot ---------- */
+.world{
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4/3;
+  background:
+    radial-gradient(circle at 50% 50%, #0d1715 0%, #070908 70%);
+  border: 1px solid var(--line-bright);
+  border-radius: 4px;
+  overflow: hidden;
+}
+#botSvg{
+  position:absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 6px 10px rgba(0,0,0,0.5));
+  transition: transform 0.05s linear;
+  z-index: 3;
+}
+.heading-ray{ position:absolute; inset:0; z-index:2; }
+
+.hud-readout{
+  position:absolute; top:14px; left:14px;
+  background: rgba(7,9,8,0.75);
+  border: 1px solid var(--line-bright);
+  border-radius: 3px;
+  padding: 10px 12px;
+  font-size: 0.7rem;
+  z-index: 4;
+  min-width: 150px;
+}
+.hud-row{ display:flex; justify-content:space-between; gap: 14px; color: var(--text-dim); padding: 2px 0; }
+.hud-row span:last-child{ color: var(--accent); font-weight: 700; }
+
+.world-empty{
+  position:absolute; inset:0;
+  display:flex; align-items:center; justify-content:center;
+  text-align:center;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  z-index: 1;
+  transition: opacity .3s;
+}
+.world-empty.hidden{ opacity:0; pointer-events:none; }
+
+/* ---------- footer ---------- */
+.footnote{
+  text-align:center;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  padding: 18px;
+  letter-spacing: 0.03em;
+  position: relative; z-index: 2;
+}
