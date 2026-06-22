@@ -179,39 +179,34 @@ async function fixVideoRotation(file) {
       const { toBlobURL } = FFmpegUtil;
       ffmpegInstance = new FFmpeg();
 
-      // the "814.ffmpeg.js" worker error happens because the UMD build tries to
-      // spawn a Web Worker from the CDN origin, which gets blocked by the browser's
-      // same-origin policy for workers. the fix: wrap BOTH the core files AND the
-      // ffmpeg.min.js wrapper itself in toBlobURL, so everything runs from a
-      // same-origin blob: URL. classWorkerURL tells the library to use our blob
-      // version of the wrapper as the worker entry point instead of trying to
-      // derive a CDN path itself.
-      const ffmpegCDN = "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.min.js";
-      const coreCDN = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd";
-
-      const [classWorkerURL, coreURL, wasmURL] = await Promise.all([
-        toBlobURL(ffmpegCDN, "text/javascript"),
-        toBlobURL(`${coreCDN}/ffmpeg-core.js`, "text/javascript"),
-        toBlobURL(`${coreCDN}/ffmpeg-core.wasm`, "application/wasm"),
-      ]);
-
-      await ffmpegInstance.load({ classWorkerURL, coreURL, wasmURL });
+      // all files are served locally from /ffmpeg/ — this sidesteps the
+      // cross-origin Worker error entirely. the browser loads 814.ffmpeg.js
+      // from localhost:8080/ffmpeg/ (same origin as the page), so no security
+      // error. works identically on netlify since the files deploy with the
+      // rest of the project. no CDN, no toBlobURL tricks needed.
+      await ffmpegInstance.load({
+        coreURL: "/ffmpeg/ffmpeg-core.js",
+        wasmURL: "/ffmpeg/ffmpeg-core.wasm",
+      });
     }
 
     showProcessing("Fixing video orientation…", "Processing…");
 
-    // write the uploaded file into ffmpeg's virtual filesystem
-    const inputName = "input" + file.name.slice(file.name.lastIndexOf("."));
+    // always use a safe fixed filename — avoids any FS errors from
+    // special characters or spaces in the original filename
+    const inputName = "input.mp4";
     const inputData = new Uint8Array(await file.arrayBuffer());
     await ffmpegInstance.writeFile(inputName, inputData);
 
-    // transpose=1 rotates 90° counter-clockwise to correct a -90° display
-    // matrix. -display_rotation 0 tells ffmpeg to READ the source as if its
-    // display matrix were 0 (i.e. not auto-apply it before our filter runs,
-    // which would cause a double-rotation). the output has no rotation flag.
-    // we verified this exact command on the user's actual phone video file.
+    // log ffmpeg output so we can see what's happening if it fails
+    ffmpegInstance.on("log", ({ message }) => console.log("[ffmpeg]", message));
+
+    // simple transpose=1 — rotates pixel data 90° clockwise to correct
+    // a phone video recorded in portrait mode (raw frames are landscape).
+    // -display_rotation was removed: it's not supported in ffmpeg.wasm's
+    // wasm build and caused the FS error (exec failed → output.mp4 never
+    // written → readFile threw). plain transpose is enough here.
     await ffmpegInstance.exec([
-      "-display_rotation", "0",
       "-i", inputName,
       "-vf", "transpose=1",
       "-c:a", "copy",

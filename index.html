@@ -156,12 +156,13 @@
     Hand landmarks detected fully in your browser via MediaPipe — nothing is uploaded to a server.
   </footer>
 
-  <!-- all scripts at the bottom so DOM elements exist before any JS runs -->
-  <!-- mediapipe hands: legacy library, exposes modelComplexity:1 (accurate) vs 0 (lite) -->
+  <!-- mediapipe hands: from CDN, doesn't have the worker path issue -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-  <!-- ffmpeg.wasm: bakes video rotation into pixels so mediapipe sees correct orientation -->
-  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
+  <!-- ffmpeg.wasm: served locally so the worker (814.ffmpeg.js) loads from
+       same origin — CDN loading causes a cross-origin Worker security error
+       that can't be fixed without a bundler. all files are in /ffmpeg/. -->
+  <script src="/ffmpeg/ffmpeg.js"></script>
+  <script src="/ffmpeg/ffmpeg-util.js"></script>
   <script type="module" src="main.js"></script>
 </body>
 </html>
