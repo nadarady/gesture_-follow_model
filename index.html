@@ -1,8 +1,3 @@
-<!--
-  pointer — hand-guided bot
-  three files, zero backend, one robot with mild ambition.
-  built it because typing directions into a UI is so 2010.
--->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -29,7 +24,6 @@
 
   <main class="layout">
 
-    <!-- LEFT: video + landmarks -->
     <section class="panel video-panel">
       <div class="panel-label">01 — INPUT FEED</div>
       <div class="stage" id="stage">
@@ -45,7 +39,6 @@
           </div>
         </div>
 
-        <!-- shown while ffmpeg.wasm is fixing the rotation -->
         <div class="processing" id="processing">
           <div class="proc-inner">
             <div class="proc-spinner"></div>
@@ -56,6 +49,7 @@
       </div>
 
       <div class="controls">
+        <button id="webcamBtn" class="btn">📷 Use Webcam</button>
         <button id="playBtn" class="btn" disabled>▶ Play</button>
         <button id="resetBtn" class="btn btn-ghost" disabled>↺ Reset</button>
         <label class="btn btn-ghost file-btn">
@@ -65,16 +59,13 @@
       </div>
     </section>
 
-    <!-- RIGHT: bot world -->
     <section class="panel world-panel">
       <div class="panel-label">02 — NAVIGATION FIELD</div>
       <div class="world" id="world">
         <svg id="botSvg" viewBox="0 0 100 110" width="72" height="78">
           <g id="botGroup">
-            <!-- soft contact shadow -->
             <ellipse cx="50" cy="98" rx="20" ry="5" fill="rgba(0,0,0,0.4)"/>
 
-            <!-- legs (animated via JS for a walk cycle) -->
             <g id="legLeft">
               <rect x="38" y="78" width="9" height="18" rx="4" fill="var(--bot-dark)"/>
               <ellipse cx="42.5" cy="97" rx="6" ry="3" fill="var(--bot-shoe)"/>
@@ -84,16 +75,13 @@
               <ellipse cx="57.5" cy="97" rx="6" ry="3" fill="var(--bot-shoe)"/>
             </g>
 
-            <!-- body: rounded capsule torso, friendlier than a plain rect -->
             <rect x="28" y="42" width="44" height="40" rx="16" fill="var(--bot-body)"/>
             <rect x="28" y="42" width="44" height="40" rx="16" fill="url(#bodyShade)"/>
 
-            <!-- chest panel + status light -->
             <rect x="37" y="52" width="26" height="18" rx="6" fill="var(--bot-panel)"/>
             <circle cx="50" cy="61" r="4" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
             <circle cx="50" cy="61" r="1.6" fill="var(--accent)"/>
 
-            <!-- arms, slightly swept back for a "walking" read at rest -->
             <g id="armLeft">
               <rect x="16" y="48" width="12" height="9" rx="4.5" fill="var(--bot-body)"/>
               <circle cx="16" cy="52.5" r="5" fill="var(--bot-dark)"/>
@@ -103,22 +91,18 @@
               <circle cx="84" cy="52.5" r="5" fill="var(--bot-dark)"/>
             </g>
 
-            <!-- head -->
             <circle cx="50" cy="26" r="15" fill="var(--bot-body)"/>
             <circle cx="50" cy="26" r="15" fill="url(#headShade)"/>
             <rect x="38" y="20" width="24" height="13" rx="6.5" fill="var(--bot-panel)"/>
 
-            <!-- eyes: this is the bit everyone screenshots, so they get extra care -->
             <circle cx="44.5" cy="26.5" r="3.1" fill="var(--bot-eye-glow)"/>
             <circle cx="55.5" cy="26.5" r="3.1" fill="var(--bot-eye-glow)"/>
             <circle cx="45.6" cy="25.4" r="0.9" fill="#ffffff"/>
             <circle cx="56.6" cy="25.4" r="0.9" fill="#ffffff"/>
 
-            <!-- antenna -->
             <line x1="50" y1="11" x2="50" y2="4" stroke="var(--bot-dark)" stroke-width="2" stroke-linecap="round"/>
             <circle cx="50" cy="3" r="2.8" fill="var(--accent)"/>
 
-            <!-- ear nubs, purely a charm detail -->
             <circle cx="35" cy="26" r="2.6" fill="var(--bot-dark)"/>
             <circle cx="65" cy="26" r="2.6" fill="var(--bot-dark)"/>
           </g>
@@ -145,7 +129,7 @@
         </div>
 
         <div class="world-empty" id="worldEmpty">
-          <p>Bot is idle.<br>Upload a video to begin navigation.</p>
+          <p>Bot is idle.<br>Upload a video or start the webcam to begin navigation.</p>
         </div>
       </div>
     </section>
@@ -156,11 +140,7 @@
     Hand landmarks detected fully in your browser via MediaPipe — nothing is uploaded to a server.
   </footer>
 
-  <!-- mediapipe hands: from CDN, doesn't have the worker path issue -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-  <!-- ffmpeg.wasm: served locally so the worker (814.ffmpeg.js) loads from
-       same origin — CDN loading causes a cross-origin Worker security error
-       that can't be fixed without a bundler. all files are in /ffmpeg/. -->
   <script src="/ffmpeg/ffmpeg.js"></script>
   <script src="/ffmpeg/ffmpeg-util.js"></script>
   <script type="module" src="main.js"></script>

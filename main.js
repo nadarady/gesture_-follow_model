@@ -12,6 +12,7 @@ const fileInput = document.getElementById("fileInput");
 const fileInput2 = document.getElementById("fileInput2");
 const playBtn = document.getElementById("playBtn");
 const resetBtn = document.getElementById("resetBtn");
+const webcamBtn = document.getElementById("webcamBtn");
 const statusDot = document.getElementById("statusDot");
 const statusText = document.getElementById("statusText");
 const world = document.getElementById("world");
@@ -39,7 +40,7 @@ const cropCanvas = document.createElement("canvas");
 const cropCtx = cropCanvas.getContext("2d", { willReadFrequently: true });
 const CROP_SIZE = 480; // upscale target — bigger than a typical small in-frame hand
 
-let hands = null;          // the legacy Hands instance
+let hands = null;        // the legacy Hands instance
 let rafId = null;
 let lastVideoTime = -1;
 
@@ -122,7 +123,7 @@ function initModel() {
     });
 
     hands.onResults(onHandsResults);
-    setStatus("ready", "model ready — drop a video");
+    setStatus("ready", "model ready — drop a video or start webcam");
   } catch (err) {
     console.error("model refused to load. typical.", err);
     setStatus("error", "model failed to load (check connection)");
@@ -156,8 +157,9 @@ dropzone.addEventListener("drop", e => {
 });
 
 function loadVideoFile(file) {
-  // kick off ffmpeg rotation fix — this is async, so we show a spinner
-  // and disable everything until it finishes
+  // If the webcam is running, shut it down before shifting to file mode
+  stopWebcam();
+
   dropzone.classList.add("hidden");
   playBtn.disabled = true;
   resetBtn.disabled = true;
@@ -167,9 +169,6 @@ function loadVideoFile(file) {
 
 // loads ffmpeg.wasm if not already loaded, then processes the video to
 // physically bake any rotation metadata into the actual pixel data.
-// why: canvas drawImage() doesn't consistently respect the display matrix
-// rotation flag that phone cameras embed — confirmed cross-browser bug,
-// no reliable JS workaround. ffmpeg.wasm is the only deterministic fix.
 async function fixVideoRotation(file) {
   showProcessing("Fixing video orientation…", "Loading ffmpeg (first time only, ~6MB)");
 
@@ -179,11 +178,6 @@ async function fixVideoRotation(file) {
       const { toBlobURL } = FFmpegUtil;
       ffmpegInstance = new FFmpeg();
 
-      // all files are served locally from /ffmpeg/ — this sidesteps the
-      // cross-origin Worker error entirely. the browser loads 814.ffmpeg.js
-      // from localhost:8080/ffmpeg/ (same origin as the page), so no security
-      // error. works identically on netlify since the files deploy with the
-      // rest of the project. no CDN, no toBlobURL tricks needed.
       await ffmpegInstance.load({
         coreURL: "/ffmpeg/ffmpeg-core.js",
         wasmURL: "/ffmpeg/ffmpeg-core.wasm",
@@ -195,7 +189,6 @@ async function fixVideoRotation(file) {
     const inputName = "input.mp4";
     const inputData = new Uint8Array(await file.arrayBuffer());
 
-    // log every ffmpeg message so we can see what's happening
     ffmpegInstance.on("log", ({ type, message }) => {
       console.log(`[ffmpeg:${type}]`, message);
     });
@@ -218,7 +211,6 @@ async function fixVideoRotation(file) {
     const outputBlob = new Blob([outputData], { type: "video/mp4" });
     const url = URL.createObjectURL(outputBlob);
 
-    // clean up ffmpeg's virtual filesystem for next time
     await ffmpegInstance.deleteFile(inputName);
     await ffmpegInstance.deleteFile("output.mp4");
 
@@ -227,8 +219,6 @@ async function fixVideoRotation(file) {
 
   } catch (err) {
     console.error("ffmpeg rotation fix failed:", err);
-    // graceful fallback: if ffmpeg fails for any reason, load the original
-    // file unchanged. better than showing nothing at all.
     hideProcessing();
     console.warn("falling back to original video (no rotation fix applied)");
     const url = URL.createObjectURL(file);
@@ -250,6 +240,78 @@ function setVideoSource(url) {
   }, { once: true });
 }
 
+// ---- webcam handling module ----
+let MIRROR_X = false; // Toggled dynamically: false for uploads, true for webcams
+let isWebcam = false;
+
+if (webcamBtn) {
+  webcamBtn.addEventListener("click", () => {
+    if (isWebcam) {
+      stopWebcam();
+      resetBot();
+      setStatus("ready", "Webcam stopped. Drop a video or click webcam again.");
+    } else {
+      startWebcam();
+    }
+  });
+}
+
+async function startWebcam() {
+  video.pause();
+  if (rafId) cancelAnimationFrame(rafId);
+  resetBot();
+  showProcessing("Starting Webcam...", "Requesting hardware access privileges...");
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { 
+        width: { ideal: 640 }, 
+        height: { ideal: 480 },
+        facingMode: "user" 
+      },
+      audio: false
+    });
+
+    hideProcessing();
+    video.srcObject = stream;
+    isWebcam = true;
+    MIRROR_X = true; // Mirror horizontal coordinates so interactions look intuitive
+    
+    playBtn.disabled = true; 
+    playBtn.textContent = "⏸ Live Tracking";
+    if (webcamBtn) webcamBtn.textContent = "📷 Stop Webcam";
+    setStatus("ready", "Webcam live — tracking hand position...");
+
+    video.addEventListener("loadedmetadata", () => {
+      video.playbackRate = 1.0; // Live streaming forces normal execution speeds
+      video.play();
+      overlay.width = video.clientWidth;
+      overlay.height = video.clientHeight;
+      predictLoop();
+    }, { once: true });
+
+  } catch (err) {
+    console.error("Webcam runtime mapping initialization failed:", err);
+    hideProcessing();
+    setStatus("error", "Webcam access denied or unavailable.");
+    isWebcam = false;
+    MIRROR_X = false;
+  }
+}
+
+function stopWebcam() {
+  if (video.srcObject) {
+    const tracks = video.srcObject.getTracks();
+    tracks.forEach(track => track.stop());
+    video.srcObject = null;
+  }
+  isWebcam = false;
+  MIRROR_X = false;
+  playBtn.disabled = false;
+  playBtn.textContent = "▶ Play";
+  if (webcamBtn) webcamBtn.textContent = "📷 Use Webcam";
+}
+
 function showProcessing(title, sub) {
   procTitle.textContent = title;
   procSub.textContent = sub;
@@ -261,23 +323,17 @@ function hideProcessing() {
 }
 
 window.addEventListener("resize", () => {
-  if (video.videoWidth) {
+  if (video.videoWidth || video.srcObject) {
     overlay.width = video.clientWidth;
     overlay.height = video.clientHeight;
   }
 });
 
 // ---- playback controls ----
-//
-// playing at normal (1x) speed while doing two detection passes a frame
-// (the crop-and-zoom thing) means processing can fall behind the actual
-// video clock — frames just get silently skipped when that happens, which
-// looks exactly like "randomly doesn't see my hand." slowing playback down
-// gives detection enough headroom to actually keep up with every frame
-// instead of dropping whichever ones it didn't finish in time.
 const PLAYBACK_RATE = 0.4;
 
 playBtn.addEventListener("click", () => {
+  if (isWebcam) return; // Ignore file stream buttons during active webcam usage
   if (video.paused) {
     video.playbackRate = PLAYBACK_RATE;
     video.play();
@@ -296,6 +352,7 @@ video.addEventListener("ended", () => {
 });
 
 resetBtn.addEventListener("click", () => {
+  stopWebcam();
   video.pause();
   video.currentTime = 0;
   playBtn.textContent = "▶ Play";
@@ -328,40 +385,29 @@ function clearOverlay() {
 }
 
 // ---- the main loop ----
-//
-// this works differently than it used to, because the legacy Hands library
-// is callback-based instead of synchronous. the flow per frame is now:
-//   1. predictLoop fires on every rAF tick. if no detection is currently
-//      in flight, kick one off (hands.send) and remember which crop rect
-//      it was for.
-//   2. sometime later (could be a few ms, could be most of a frame), the
-//      result arrives via onHandsResults. that's where we actually update
-//      the on-screen skeleton, recompute the hand's bounding box, and feed
-//      the angle into the smoothing buffer.
-// the crop-and-zoom idea (detect on a tight, upscaled crop instead of the
-// whole frame, because mediapipe's hand detector struggles when the hand
-// is small/off-center/angled) is unchanged — it's just wired up around an
-// async call now instead of a synchronous one.
 function predictLoop() {
-  if (video.paused || video.ended) return;
+  if ((!isWebcam && (video.paused || video.ended))) return;
 
-  if (hands && !detectionInFlight && video.currentTime !== lastVideoTime) {
-    lastVideoTime = video.currentTime;
-    sendFrameForDetection();
+  // For webcams, check frame updates without evaluating standard video time stamps
+  if (hands && !detectionInFlight) {
+    if (isWebcam || video.currentTime !== lastVideoTime) {
+      if (!isWebcam) lastVideoTime = video.currentTime;
+      sendFrameForDetection();
+    }
   }
 
   stepBot();
   rafId = requestAnimationFrame(predictLoop);
 }
 
-// how often (in frames) to force a full-frame scan even if we currently
-// have a crop fix — catches the hand if it jumps somewhere the crop
-// doesn't cover, e.g. a cut/jump in the source footage
 const FULL_SCAN_INTERVAL = 20;
 
 function sendFrameForDetection() {
-  const vw = video.videoWidth, vh = video.videoHeight;
-  if (!vw || !vh) return;
+  // Check if active source frame streams exist
+  if (!isWebcam && (!video.videoWidth || !video.videoHeight)) return;
+
+  const vw = video.videoWidth || video.clientWidth;
+  const vh = video.videoHeight || video.clientHeight;
 
   framesSinceFullScan++;
   const needsFullScan = !lastHandBox || framesSinceFullScan >= FULL_SCAN_INTERVAL;
@@ -370,43 +416,35 @@ function sendFrameForDetection() {
 
   if (needsFullScan) {
     framesSinceFullScan = 0;
-    pendingCropForInFlightDetection = null; // null = this result is in full-frame coordinates
+    pendingCropForInFlightDetection = null;
     hands.send({ image: video });
     return;
   }
 
-  // crop tight around where we last saw the hand, upscale it, and detect
-  // on THAT instead of the full frame
   const crop = computeCropRect(lastHandBox, vw, vh);
   cropCanvas.width = CROP_SIZE;
   cropCanvas.height = CROP_SIZE;
   cropCtx.drawImage(
     video,
-    crop.x, crop.y, crop.size, crop.size,  // source rect, in real video pixels
-    0, 0, CROP_SIZE, CROP_SIZE             // dest rect, filling the upscaled canvas
+    crop.x, crop.y, crop.size, crop.size,  
+    0, 0, CROP_SIZE, CROP_SIZE             
   );
 
   pendingCropForInFlightDetection = crop;
   hands.send({ image: cropCanvas });
 }
 
-// the callback the legacy library calls once detection actually finishes.
-// `results.multiHandLandmarks` is this library's name for what the newer
-// API called `result.landmarks` — same 21-point shape per hand, different
-// field name.
 function onHandsResults(results) {
   const crop = pendingCropForInFlightDetection;
   detectionInFlight = false;
 
   const landmarksList = results.multiHandLandmarks;
+  const vw = video.videoWidth || video.clientWidth;
+  const vh = video.videoHeight || video.clientHeight;
 
   if (landmarksList && landmarksList.length > 0) {
-    lastHandBox = boundingBoxFromLandmarks(landmarksList[0], crop, video.videoWidth, video.videoHeight);
+    lastHandBox = boundingBoxFromLandmarks(landmarksList[0], crop, vw, vh);
   } else if (crop) {
-    // missed inside a crop — don't immediately abandon the crop fix, the
-    // presence-hysteresis logic in updateDirection handles brief gaps. but
-    // if we keep missing, force a full rescan soon instead of staying
-    // stuck staring at empty space.
     framesSinceFullScan = FULL_SCAN_INTERVAL - 3;
   } else {
     lastHandBox = null;
@@ -416,47 +454,33 @@ function onHandsResults(results) {
   updateDirection(landmarksList, crop);
 }
 
-// works out a square crop region (in real video pixel coordinates) centered
-// on the last known hand position, padded generously so fast hand movement
-// between frames doesn't immediately fall outside the crop
 function computeCropRect(box, vw, vh) {
   if (!box) {
-    // no fix yet — crop is just the whole frame
     const size = Math.min(vw, vh);
     return { x: (vw - size) / 2, y: (vh - size) / 2, size };
   }
 
-  const PADDING_FACTOR = 2.6; // how much bigger than the hand's own bbox to crop
+  const PADDING_FACTOR = 2.6; 
   const cx = box.cx * vw;
   const cy = box.cy * vh;
   let size = box.size * Math.max(vw, vh) * PADDING_FACTOR;
 
-  // floor/ceiling so the crop never gets absurdly tiny (jittery zoom) or
-  // bigger than the frame itself
   size = Math.max(size, Math.min(vw, vh) * 0.25);
   size = Math.min(size, Math.min(vw, vh));
 
   let x = cx - size / 2;
   let y = cy - size / 2;
-  // clamp so the crop rectangle stays inside the actual video frame
   x = Math.max(0, Math.min(vw - size, x));
   y = Math.max(0, Math.min(vh - size, y));
 
   return { x, y, size };
 }
 
-// derives a rough center+size bounding box from a hand's 21 landmarks.
-// if `crop`/`vw`/`vh` are provided, the landmarks are assumed to be in
-// crop-normalized space and get remapped back to full-video-normalized
-// space first.
 function boundingBoxFromLandmarks(landmarks, crop, vw, vh) {
   let minX = 1, maxX = 0, minY = 1, maxY = 0;
   for (const p of landmarks) {
     let x = p.x, y = p.y;
     if (crop) {
-      // p.x/p.y are normalized within the crop (0..1) — convert to real
-      // pixels within the crop, then to real video pixels, then back to
-      // normalized full-video coordinates
       x = (crop.x + x * crop.size) / vw;
       y = (crop.y + y * crop.size) / vh;
     }
@@ -470,15 +494,6 @@ function boundingBoxFromLandmarks(landmarks, crop, vw, vh) {
   };
 }
 
-// ---- draw the skeleton overlay on top of the video ----
-//
-const MIRROR_X = false;
-
-// remaps a single landmark point from crop-normalized space (0..1 within
-// the cropped/upscaled detection canvas) back to full-video-normalized
-// space (0..1 within the original video frame). pass `null` for crop when
-// the result already came from a full-frame detection pass — then it's a
-// no-op passthrough.
 function remapPoint(p, crop, vw, vh) {
   if (!crop) return p;
   return {
@@ -492,12 +507,10 @@ function drawLandmarks(landmarksList, crop) {
   if (!landmarksList || landmarksList.length === 0) return;
 
   const w = overlay.width, h = overlay.height;
-  const vw = video.videoWidth, vh = video.videoHeight;
+  const vw = video.videoWidth || video.clientWidth;
+  const vh = video.videoHeight || video.clientHeight;
 
   for (const rawLandmarks of landmarksList) {
-    // remap every point back to full-video space up front, so the rest of
-    // this function doesn't need to care whether we're looking at a
-    // full-frame result or a cropped-and-upscaled one
     const landmarks = crop ? rawLandmarks.map(p => remapPoint(p, crop, vw, vh)) : rawLandmarks;
 
     ctx.strokeStyle = "rgba(93,255,196,0.85)";
@@ -515,7 +528,7 @@ function drawLandmarks(landmarksList, crop) {
       const px = MIRROR_X ? (1 - p.x) * w : p.x * w;
       ctx.beginPath();
       ctx.arc(px, p.y * h, i === 8 ? 5 : 3.2, 0, Math.PI * 2);
-      ctx.fillStyle = i === 8 ? "#ffffff" : "#5dffc4"; // fingertip gets star treatment
+      ctx.fillStyle = i === 8 ? "#ffffff" : "#5dffc4"; 
       ctx.fill();
       if (i === 8) {
         ctx.strokeStyle = "rgba(93,255,196,0.9)";
@@ -526,11 +539,6 @@ function drawLandmarks(landmarksList, crop) {
   }
 }
 
-// ---- figure out which way the finger is pointing ----
-// using the vector from the index MCP joint (5) to the fingertip (8) instead of
-// wrist-to-tip. wrist-to-tip sounds more intuitive but it drifts whenever the
-// whole hand rotates, even if the finger itself didn't change angle. MCP-to-tip
-// only cares about the finger's own pose, which turned out to be way steadier.
 function updateDirection(landmarksList, crop) {
   const sawHand = landmarksList && landmarksList.length > 0;
 
@@ -543,22 +551,18 @@ function updateDirection(landmarksList, crop) {
       hudConf.textContent = "no hand";
       rayLine.setAttribute("opacity", 0);
     }
-    // if we're still inside the "off threshold" grace window, just hold
-    // the last known heading rather than reacting to this one missed frame
     return;
   }
 
   consecutiveMisses = 0;
   consecutiveHits++;
 
-  const vw = video.videoWidth, vh = video.videoHeight;
+  const vw = video.videoWidth || video.clientWidth;
+  const vh = video.videoHeight || video.clientHeight;
   const rawLm = landmarksList[0];
   const base = remapPoint(rawLm[5], crop, vw, vh);
   const tip = remapPoint(rawLm[8], crop, vw, vh);
 
-  // same MIRROR_X flip as the drawing code, applied to x before computing
-  // the vector — keeps the heading agreeing with what the skeleton shows
-  // on screen, instead of the raw (possibly mirrored) frame data.
   const baseX = MIRROR_X ? 1 - base.x : base.x;
   const tipX = MIRROR_X ? 1 - tip.x : tip.x;
 
@@ -566,13 +570,9 @@ function updateDirection(landmarksList, crop) {
   const dy = tip.y - base.y;
 
   const mag = Math.hypot(dx, dy) || 1;
-  // push this frame's reading into the buffer as a unit vector, not a raw
-  // angle — see the big comment up top for why
   angleBuffer.push({ x: dx / mag, y: dy / mag });
   if (angleBuffer.length > SMOOTH_WINDOW) angleBuffer.shift();
 
-  // average the buffered vectors, then re-derive the angle. this is the
-  // standard trick for averaging angles without wraparound blowing up.
   let sumX = 0, sumY = 0;
   for (const v of angleBuffer) { sumX += v.x; sumY += v.y; }
   const avgX = sumX / angleBuffer.length;
@@ -581,9 +581,6 @@ function updateDirection(landmarksList, crop) {
   const angleRad = Math.atan2(avgY, avgX);
   const angleDeg = angleRad * (180 / Math.PI);
 
-  // require a couple consistent hits before we actually trust this and
-  // start moving — kills the "twitches the instant it glimpses something
-  // hand-shaped for one frame" issue
   if (consecutiveHits < PRESENCE_ON_THRESHOLD) return;
 
   targetAngleDeg = angleDeg;
@@ -605,13 +602,9 @@ function updateDirection(landmarksList, crop) {
 }
 
 // ---- move the little guy ----
-
 function stepBot() {
   if (!hasDirection) return;
 
-  // shortest-path angle smoothing. without the wraparound correction here,
-  // going from like 179° to -179° makes the bot do a dramatic 358° pirouette
-  // instead of just nudging 2° further. learned that one the hard way.
   let diff = targetAngleDeg - botAngleDeg;
   diff = ((diff + 180) % 360 + 360) % 360 - 180;
   botAngleDeg += diff * 0.12;
@@ -624,14 +617,6 @@ function stepBot() {
   let nx = botPos.x + Math.cos(rad) * BOT_SPEED;
   let ny = botPos.y + Math.sin(rad) * BOT_SPEED;
 
-  // pac-man rules: walk off one edge, show up on the other.
-  //
-  // got this backwards on the first attempt — the world panel has
-  // overflow:hidden, so the bot needs to wrap the INSTANT its leading edge
-  // would touch the panel boundary, not after its center clears some buffer
-  // past it. otherwise it visually vanishes into the clipped edge for a
-  // stretch before the wrap kicks in, which looks exactly like hitting a
-  // wall. threshold is world-half-size minus the bot's own half-size.
   const botHalfW = 36;
   const botHalfH = 39;
   if (nx > halfW - botHalfW) nx = -halfW + botHalfW;
@@ -647,14 +632,10 @@ function stepBot() {
 
 function renderBot() {
   const svg = document.getElementById("botSvg");
-  // bot's resting art faces "up" the screen, which is -90deg in atan2-land,
-  // so we add 90deg to line its nose up with wherever it's actually heading.
   const visualOffset = 90;
   svg.style.transform =
     `translate(-50%, -50%) translate(${botPos.x}px, ${botPos.y}px) rotate(${botAngleDeg + visualOffset}deg)`;
 
-  // tiny walk cycle — legs and arms swing opposite each other. purely
-  // decorative, the direction math couldn't care less about this part.
   if (hasDirection) {
     const swing = Math.sin(walkCycle) * 12;
     legLeft.style.transform = `rotate(${swing}deg)`;
@@ -668,5 +649,4 @@ function renderBot() {
   }
 }
 
-// draw it once at rest so the page doesn't look broken before a video loads
 renderBot();

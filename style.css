@@ -171,6 +171,25 @@ body{
 }
 .file-btn{ display:inline-flex; align-items:center; }
 
+/* Webcam specific styling */
+#webcamBtn {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+#webcamBtn:hover:not(:disabled) {
+  background: rgba(93, 255, 196, 0.1);
+}
+
+/* Optional: If you want a visual "recording" indicator when live, 
+   you can toggle a .live class on the button in your JS */
+#webcamBtn.live {
+  background: rgba(255, 107, 94, 0.1); /* transparent version of your --warn color */
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
 /* ---------- calibration ---------- */
 .calibration{
   border-top: 1px dashed var(--line-bright);
