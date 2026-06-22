@@ -158,13 +158,13 @@ dropzone.addEventListener("drop", e => {
   if (file && file.type.startsWith("video/")) loadVideoFile(file);
 });
 
-function loadVideoFile(file) {
+async function loadVideoFile(file) {
   stopWebcam();
   dropzone.classList.add("hidden");
   playBtn.disabled = true;
   resetBtn.disabled = true;
   setStatus("", "fixing video orientation…");
-  fixVideoRotation(file);
+  await fixVideoRotation(file);
 }
 
 // loads ffmpeg.wasm if not already loaded, then processes the video to
@@ -227,6 +227,13 @@ async function fixVideoRotation(file) {
 }
 
 function setVideoSource(url) {
+  // If there's an explicit stage element wrapper hidden in the CSS, show it
+  const stageEl = document.getElementById("stage") || document.querySelector(".stage") || document.getElementById("videoContainer");
+  if (stageEl) {
+    stageEl.classList.remove("hidden");
+    stageEl.style.display = "block";
+  }
+
   video.src = url;
   video.load();
   playBtn.disabled = false;
@@ -235,8 +242,8 @@ function setVideoSource(url) {
   setStatus("ready", "video ready — press play");
 
   video.addEventListener("loadedmetadata", () => {
-    overlay.width = video.clientWidth;
-    overlay.height = video.clientHeight;
+    overlay.width = video.clientWidth || video.videoWidth || 640;
+    overlay.height = video.clientHeight || video.videoHeight || 480;
   }, { once: true });
 }
 
@@ -272,16 +279,34 @@ async function startWebcam() {
 
     hideProcessing();
     
-    // Clear old file references entirely so the visual hardware stream binds seamlessly
+    // 1. Hide the file input interface dropzone panel
+    dropzone.classList.add("hidden");
+    
+    // 2. STAGE FINDER: If layout wrappers exist under a stage class/id, uncover them completely
+    const stageEl = document.getElementById("stage") || document.querySelector(".stage") || document.getElementById("videoContainer");
+    if (stageEl) {
+      stageEl.classList.remove("hidden");
+      stageEl.style.display = "block";
+    }
+
+    // 3. Bypass mobile/browser security restriction engines
+    video.muted = true;
+    video.setAttribute("playsinline", "true");
+    
+    // 4. Detach previous static file descriptors safely
     video.src = "";
     video.removeAttribute("src");
     
     video.srcObject = stream;
     isWebcam = true;
     
-    // Flip elements on the GPU layout engine so interactions feel like a real mirror
+    // 5. STACKING CONTEXT FIX: Explicitly enforce z-indices so mirror matrix transforms 
+    // don't drop elements behind container canvas panels or view layers.
     video.style.transform = "scaleX(-1)";
+    video.style.zIndex = "1";
+    
     overlay.style.transform = "scaleX(-1)";
+    overlay.style.zIndex = "2";
     
     playBtn.disabled = true; 
     playBtn.textContent = "⏸ Live Tracking";
@@ -289,16 +314,27 @@ async function startWebcam() {
     setStatus("ready", "Webcam live — tracking hand position...");
 
     video.addEventListener("loadedmetadata", () => {
-      video.playbackRate = 1.0; // Live feeds run in real-time execution speeds
-      video.play();
-      overlay.width = video.clientWidth;
-      overlay.height = video.clientHeight;
-      predictLoop();
+      video.playbackRate = 1.0; 
+      video.play().then(() => {
+        // 6. 0PX CANVAS DIMENSION FIX: If layout has not reflowed client dimensions,
+        // use hardware stream metadata boundaries to prevent structural collapse.
+        const displayW = video.clientWidth || video.videoWidth || 640;
+        const displayH = video.clientHeight || video.videoHeight || 480;
+        
+        overlay.width = displayW;
+        overlay.height = displayH;
+        
+        predictLoop();
+      }).catch(e => {
+        console.error("Playback engine acceleration rejected:", e);
+        video.play();
+      });
     }, { once: true });
 
   } catch (err) {
     console.error("Webcam runtime mapping initialization failed:", err);
     hideProcessing();
+    dropzone.classList.remove("hidden");
     setStatus("error", "Webcam access denied or unavailable.");
     isWebcam = false;
   }
@@ -312,9 +348,14 @@ function stopWebcam() {
   }
   isWebcam = false;
   
-  // Revert matrix scaling modifications
+  // Revert matrix modifications and layout priorities
   video.style.transform = "";
+  video.style.zIndex = "";
   overlay.style.transform = "";
+  overlay.style.zIndex = "";
+  
+  // Bring dashboard frame back up
+  dropzone.classList.remove("hidden");
   
   playBtn.disabled = false;
   playBtn.textContent = "▶ Play";
@@ -333,8 +374,8 @@ function hideProcessing() {
 
 window.addEventListener("resize", () => {
   if (video.videoWidth || video.srcObject) {
-    overlay.width = video.clientWidth;
-    overlay.height = video.clientHeight;
+    overlay.width = video.clientWidth || video.videoWidth || 640;
+    overlay.height = video.clientHeight || video.videoHeight || 480;
   }
 });
 
@@ -413,8 +454,8 @@ const FULL_SCAN_INTERVAL = 20;
 function sendFrameForDetection() {
   if (!isWebcam && (!video.videoWidth || !video.videoHeight)) return;
 
-  const vw = video.videoWidth || video.clientWidth;
-  const vh = video.videoHeight || video.clientHeight;
+  const vw = video.videoWidth || video.clientWidth || 640;
+  const vh = video.videoHeight || video.clientHeight || 480;
 
   framesSinceFullScan++;
   const needsFullScan = !lastHandBox || framesSinceFullScan >= FULL_SCAN_INTERVAL;
@@ -446,8 +487,8 @@ function onHandsResults(results) {
   detectionInFlight = false;
 
   const landmarksList = results.multiHandLandmarks;
-  const vw = video.videoWidth || video.clientWidth;
-  const vh = video.videoHeight || video.clientHeight;
+  const vw = video.videoWidth || video.clientWidth || 640;
+  const vh = video.videoHeight || video.clientHeight || 480;
 
   if (landmarksList && landmarksList.length > 0) {
     lastHandBox = boundingBoxFromLandmarks(landmarksList[0], crop, vw, vh);
@@ -513,9 +554,10 @@ function drawLandmarks(landmarksList, crop) {
   clearOverlay();
   if (!landmarksList || landmarksList.length === 0) return;
 
-  const w = overlay.width, h = overlay.height;
-  const vw = video.videoWidth || video.clientWidth;
-  const vh = video.videoHeight || video.clientHeight;
+  const w = overlay.width;
+  const h = overlay.height;
+  const vw = video.videoWidth || video.clientWidth || 640;
+  const vh = video.videoHeight || video.clientHeight || 480;
 
   for (const rawLandmarks of landmarksList) {
     const landmarks = crop ? rawLandmarks.map(p => remapPoint(p, crop, vw, vh)) : rawLandmarks;
@@ -525,7 +567,6 @@ function drawLandmarks(landmarksList, crop) {
     for (const [a, b] of HAND_CONNECTIONS) {
       const p1 = landmarks[a], p2 = landmarks[b];
       
-      // CSS handles the visual mirror transform; canvas mappings use raw values
       const x1 = p1.x * w;
       const x2 = p2.x * w;
       
@@ -568,13 +609,12 @@ function updateDirection(landmarksList, crop) {
   consecutiveMisses = 0;
   consecutiveHits++;
 
-  const vw = video.videoWidth || video.clientWidth;
-  const vh = video.videoHeight || video.clientHeight;
+  const vw = video.videoWidth || video.clientWidth || 640;
+  const vh = video.videoHeight || video.clientHeight || 480;
   const rawLm = landmarksList[0];
   const base = remapPoint(rawLm[5], crop, vw, vh);
   const tip = remapPoint(rawLm[8], crop, vw, vh);
 
-  // If webcam stream is active, invert the x vector difference to map mirrored screen space accurately
   const dx = isWebcam ? base.x - tip.x : tip.x - base.x;
   const dy = tip.y - base.y;
 
