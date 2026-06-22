@@ -11,15 +11,6 @@
 <title>Pointer — hand-guided bot</title>
 <link rel="icon" href="favicon.ico">
 <link rel="stylesheet" href="style.css">
-<!--
-  switched from the newer @mediapipe/tasks-vision to the older
-  @mediapipe/hands library — it's officially "legacy" (google moved
-  everyone to Tasks back in 2023) but it's what basically every real
-  hand-tracking project in the wild actually runs, and unlike the new
-  API, it exposes a real modelComplexity setting (0 = fast/lite,
-  1 = accurate/full). we want 1.
--->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
@@ -51,6 +42,15 @@
             <p class="dz-title">Drop a hand video here</p>
             <p class="dz-sub">or click to browse — .mp4, .mov, .webm</p>
             <input type="file" id="fileInput" accept="video/*" hidden>
+          </div>
+        </div>
+
+        <!-- shown while ffmpeg.wasm is fixing the rotation -->
+        <div class="processing" id="processing">
+          <div class="proc-inner">
+            <div class="proc-spinner"></div>
+            <p class="proc-title" id="procTitle">Fixing video orientation…</p>
+            <p class="proc-sub" id="procSub">Loading ffmpeg (first time only, ~6MB)</p>
           </div>
         </div>
       </div>
@@ -156,6 +156,12 @@
     Hand landmarks detected fully in your browser via MediaPipe — nothing is uploaded to a server.
   </footer>
 
+  <!-- all scripts at the bottom so DOM elements exist before any JS runs -->
+  <!-- mediapipe hands: legacy library, exposes modelComplexity:1 (accurate) vs 0 (lite) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <!-- ffmpeg.wasm: bakes video rotation into pixels so mediapipe sees correct orientation -->
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
   <script type="module" src="main.js"></script>
 </body>
 </html>

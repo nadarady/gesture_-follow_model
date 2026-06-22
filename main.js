@@ -1,9 +1,7 @@
 // if you're reading this... you either have no life, or you're interested in how this works.
 // most likely the former. either way, welcome. grab a coffee, this one's got some math in it.
 //
-// Hands comes from the <script> tag in index.html (the legacy
-// @mediapipe/hands library), not an import — that's just how this older
-// library ships. it's available globally by the time this module runs.
+// Hands + FFmpeg come from <script> tags in index.html, available as globals.
 
 // the usual suspects
 const video = document.getElementById("video");
@@ -25,6 +23,15 @@ const legLeft = document.getElementById("legLeft");
 const legRight = document.getElementById("legRight");
 const armLeft = document.getElementById("armLeft");
 const armRight = document.getElementById("armRight");
+const processingEl = document.getElementById("processing");
+const procTitle = document.getElementById("procTitle");
+const procSub = document.getElementById("procSub");
+
+// ffmpeg.wasm instance — loaded lazily on first video upload, not on page load,
+// so the user isn't sitting around waiting for 6MB of wasm before they've even
+// dropped a file yet.
+let ffmpegInstance = null;
+let ffmpegLoading = false;
 
 // offscreen canvas used for the cropped/upscaled second detection pass —
 // never shown to the user, just a scratchpad we feed back into mediapipe
@@ -149,19 +156,107 @@ dropzone.addEventListener("drop", e => {
 });
 
 function loadVideoFile(file) {
-  const url = URL.createObjectURL(file);
+  // kick off ffmpeg rotation fix — this is async, so we show a spinner
+  // and disable everything until it finishes
+  dropzone.classList.add("hidden");
+  playBtn.disabled = true;
+  resetBtn.disabled = true;
+  setStatus("", "fixing video orientation…");
+  fixVideoRotation(file);
+}
+
+// loads ffmpeg.wasm if not already loaded, then processes the video to
+// physically bake any rotation metadata into the actual pixel data.
+// why: canvas drawImage() doesn't consistently respect the display matrix
+// rotation flag that phone cameras embed — confirmed cross-browser bug,
+// no reliable JS workaround. ffmpeg.wasm is the only deterministic fix.
+async function fixVideoRotation(file) {
+  showProcessing("Fixing video orientation…", "Loading ffmpeg (first time only, ~6MB)");
+
+  try {
+    if (!ffmpegInstance) {
+      const { FFmpeg } = FFmpegWASM;
+      const { toBlobURL } = FFmpegUtil;
+      ffmpegInstance = new FFmpeg();
+
+      // core@0.12.6 is the most stable single-thread build — no SharedArrayBuffer
+      // needed, works without special COOP/COEP headers for the core itself
+      // (we still need COOP/COEP for the Worker that ffmpeg.wasm spawns, hence
+      // the _headers file). using toBlobURL wraps each CDN asset in a same-origin
+      // blob: URL, which sidesteps the cross-origin Worker path resolution bug
+      // that affects the UMD build when loaded from CDN directly.
+      const baseURL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd";
+      await ffmpegInstance.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+      });
+    }
+
+    showProcessing("Fixing video orientation…", "Processing…");
+
+    // write the uploaded file into ffmpeg's virtual filesystem
+    const inputName = "input" + file.name.slice(file.name.lastIndexOf("."));
+    const inputData = new Uint8Array(await file.arrayBuffer());
+    await ffmpegInstance.writeFile(inputName, inputData);
+
+    // transpose=1 rotates 90° counter-clockwise to correct a -90° display
+    // matrix. -display_rotation 0 tells ffmpeg to READ the source as if its
+    // display matrix were 0 (i.e. not auto-apply it before our filter runs,
+    // which would cause a double-rotation). the output has no rotation flag.
+    // we verified this exact command on the user's actual phone video file.
+    await ffmpegInstance.exec([
+      "-display_rotation", "0",
+      "-i", inputName,
+      "-vf", "transpose=1",
+      "-c:a", "copy",
+      "output.mp4"
+    ]);
+
+    // read the fixed video back out and hand it to the browser
+    const outputData = await ffmpegInstance.readFile("output.mp4");
+    const outputBlob = new Blob([outputData.buffer], { type: "video/mp4" });
+    const url = URL.createObjectURL(outputBlob);
+
+    // clean up ffmpeg's virtual filesystem for next time
+    await ffmpegInstance.deleteFile(inputName);
+    await ffmpegInstance.deleteFile("output.mp4");
+
+    hideProcessing();
+    setVideoSource(url);
+
+  } catch (err) {
+    console.error("ffmpeg rotation fix failed:", err);
+    // graceful fallback: if ffmpeg fails for any reason, load the original
+    // file unchanged. better than showing nothing at all.
+    hideProcessing();
+    console.warn("falling back to original video (no rotation fix applied)");
+    const url = URL.createObjectURL(file);
+    setVideoSource(url);
+  }
+}
+
+function setVideoSource(url) {
   video.src = url;
   video.load();
-  dropzone.classList.add("hidden");
   playBtn.disabled = false;
   resetBtn.disabled = false;
   resetBot();
-  setStatus("ready", "video loaded — press play");
+  setStatus("ready", "video ready — press play");
 
   video.addEventListener("loadedmetadata", () => {
     overlay.width = video.clientWidth;
     overlay.height = video.clientHeight;
   }, { once: true });
+}
+
+function showProcessing(title, sub) {
+  procTitle.textContent = title;
+  procSub.textContent = sub;
+  processingEl.classList.add("visible");
+}
+
+function hideProcessing() {
+  processingEl.classList.remove("visible");
 }
 
 window.addEventListener("resize", () => {
