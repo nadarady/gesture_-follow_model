@@ -179,17 +179,23 @@ async function fixVideoRotation(file) {
       const { toBlobURL } = FFmpegUtil;
       ffmpegInstance = new FFmpeg();
 
-      // core@0.12.6 is the most stable single-thread build — no SharedArrayBuffer
-      // needed, works without special COOP/COEP headers for the core itself
-      // (we still need COOP/COEP for the Worker that ffmpeg.wasm spawns, hence
-      // the _headers file). using toBlobURL wraps each CDN asset in a same-origin
-      // blob: URL, which sidesteps the cross-origin Worker path resolution bug
-      // that affects the UMD build when loaded from CDN directly.
-      const baseURL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd";
-      await ffmpegInstance.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-      });
+      // the "814.ffmpeg.js" worker error happens because the UMD build tries to
+      // spawn a Web Worker from the CDN origin, which gets blocked by the browser's
+      // same-origin policy for workers. the fix: wrap BOTH the core files AND the
+      // ffmpeg.min.js wrapper itself in toBlobURL, so everything runs from a
+      // same-origin blob: URL. classWorkerURL tells the library to use our blob
+      // version of the wrapper as the worker entry point instead of trying to
+      // derive a CDN path itself.
+      const ffmpegCDN = "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.min.js";
+      const coreCDN = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd";
+
+      const [classWorkerURL, coreURL, wasmURL] = await Promise.all([
+        toBlobURL(ffmpegCDN, "text/javascript"),
+        toBlobURL(`${coreCDN}/ffmpeg-core.js`, "text/javascript"),
+        toBlobURL(`${coreCDN}/ffmpeg-core.wasm`, "application/wasm"),
+      ]);
+
+      await ffmpegInstance.load({ classWorkerURL, coreURL, wasmURL });
     }
 
     showProcessing("Fixing video orientation…", "Processing…");
