@@ -12,7 +12,7 @@ const fileInput = document.getElementById("fileInput");
 const fileInput2 = document.getElementById("fileInput2");
 const playBtn = document.getElementById("playBtn");
 const resetBtn = document.getElementById("resetBtn");
-const webcamBtn = document.getElementById("webcamBtn");
+const webcamBtn = document.getElementById("webcamBtn"); 
 const statusDot = document.getElementById("statusDot");
 const statusText = document.getElementById("statusText");
 const world = document.getElementById("world");
@@ -102,6 +102,8 @@ const HAND_CONNECTIONS = [
   [0,17]
 ];
 
+let isWebcam = false;
+
 function initModel() {
   try {
     // Hands is a global from the hands.js <script> tag in index.html, not
@@ -157,9 +159,7 @@ dropzone.addEventListener("drop", e => {
 });
 
 function loadVideoFile(file) {
-  // If the webcam is running, shut it down before shifting to file mode
   stopWebcam();
-
   dropzone.classList.add("hidden");
   playBtn.disabled = true;
   resetBtn.disabled = true;
@@ -241,8 +241,6 @@ function setVideoSource(url) {
 }
 
 // ---- webcam handling module ----
-let MIRROR_X = false; // Toggled dynamically: false for uploads, true for webcams
-let isWebcam = false;
 
 if (webcamBtn) {
   webcamBtn.addEventListener("click", () => {
@@ -273,9 +271,17 @@ async function startWebcam() {
     });
 
     hideProcessing();
+    
+    // Clear old file references entirely so the visual hardware stream binds seamlessly
+    video.src = "";
+    video.removeAttribute("src");
+    
     video.srcObject = stream;
     isWebcam = true;
-    MIRROR_X = true; // Mirror horizontal coordinates so interactions look intuitive
+    
+    // Flip elements on the GPU layout engine so interactions feel like a real mirror
+    video.style.transform = "scaleX(-1)";
+    overlay.style.transform = "scaleX(-1)";
     
     playBtn.disabled = true; 
     playBtn.textContent = "⏸ Live Tracking";
@@ -283,7 +289,7 @@ async function startWebcam() {
     setStatus("ready", "Webcam live — tracking hand position...");
 
     video.addEventListener("loadedmetadata", () => {
-      video.playbackRate = 1.0; // Live streaming forces normal execution speeds
+      video.playbackRate = 1.0; // Live feeds run in real-time execution speeds
       video.play();
       overlay.width = video.clientWidth;
       overlay.height = video.clientHeight;
@@ -295,7 +301,6 @@ async function startWebcam() {
     hideProcessing();
     setStatus("error", "Webcam access denied or unavailable.");
     isWebcam = false;
-    MIRROR_X = false;
   }
 }
 
@@ -306,7 +311,11 @@ function stopWebcam() {
     video.srcObject = null;
   }
   isWebcam = false;
-  MIRROR_X = false;
+  
+  // Revert matrix scaling modifications
+  video.style.transform = "";
+  overlay.style.transform = "";
+  
   playBtn.disabled = false;
   playBtn.textContent = "▶ Play";
   if (webcamBtn) webcamBtn.textContent = "📷 Use Webcam";
@@ -333,7 +342,7 @@ window.addEventListener("resize", () => {
 const PLAYBACK_RATE = 0.4;
 
 playBtn.addEventListener("click", () => {
-  if (isWebcam) return; // Ignore file stream buttons during active webcam usage
+  if (isWebcam) return; 
   if (video.paused) {
     video.playbackRate = PLAYBACK_RATE;
     video.play();
@@ -386,9 +395,8 @@ function clearOverlay() {
 
 // ---- the main loop ----
 function predictLoop() {
-  if ((!isWebcam && (video.paused || video.ended))) return;
+  if (!isWebcam && (video.paused || video.ended)) return;
 
-  // For webcams, check frame updates without evaluating standard video time stamps
   if (hands && !detectionInFlight) {
     if (isWebcam || video.currentTime !== lastVideoTime) {
       if (!isWebcam) lastVideoTime = video.currentTime;
@@ -403,7 +411,6 @@ function predictLoop() {
 const FULL_SCAN_INTERVAL = 20;
 
 function sendFrameForDetection() {
-  // Check if active source frame streams exist
   if (!isWebcam && (!video.videoWidth || !video.videoHeight)) return;
 
   const vw = video.videoWidth || video.clientWidth;
@@ -517,15 +524,19 @@ function drawLandmarks(landmarksList, crop) {
     ctx.lineWidth = 2;
     for (const [a, b] of HAND_CONNECTIONS) {
       const p1 = landmarks[a], p2 = landmarks[b];
-      const x1 = MIRROR_X ? (1 - p1.x) * w : p1.x * w;
-      const x2 = MIRROR_X ? (1 - p2.x) * w : p2.x * w;
+      
+      // CSS handles the visual mirror transform; canvas mappings use raw values
+      const x1 = p1.x * w;
+      const x2 = p2.x * w;
+      
       ctx.beginPath();
       ctx.moveTo(x1, p1.y * h);
       ctx.lineTo(x2, p2.y * h);
       ctx.stroke();
     }
     landmarks.forEach((p, i) => {
-      const px = MIRROR_X ? (1 - p.x) * w : p.x * w;
+      const px = p.x * w;
+      
       ctx.beginPath();
       ctx.arc(px, p.y * h, i === 8 ? 5 : 3.2, 0, Math.PI * 2);
       ctx.fillStyle = i === 8 ? "#ffffff" : "#5dffc4"; 
@@ -563,10 +574,8 @@ function updateDirection(landmarksList, crop) {
   const base = remapPoint(rawLm[5], crop, vw, vh);
   const tip = remapPoint(rawLm[8], crop, vw, vh);
 
-  const baseX = MIRROR_X ? 1 - base.x : base.x;
-  const tipX = MIRROR_X ? 1 - tip.x : tip.x;
-
-  const dx = tipX - baseX;
+  // If webcam stream is active, invert the x vector difference to map mirrored screen space accurately
+  const dx = isWebcam ? base.x - tip.x : tip.x - base.x;
   const dy = tip.y - base.y;
 
   const mag = Math.hypot(dx, dy) || 1;
