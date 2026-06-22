@@ -192,30 +192,30 @@ async function fixVideoRotation(file) {
 
     showProcessing("Fixing video orientation…", "Processing…");
 
-    // always use a safe fixed filename — avoids any FS errors from
-    // special characters or spaces in the original filename
     const inputName = "input.mp4";
     const inputData = new Uint8Array(await file.arrayBuffer());
+
+    // log every ffmpeg message so we can see what's happening
+    ffmpegInstance.on("log", ({ type, message }) => {
+      console.log(`[ffmpeg:${type}]`, message);
+    });
+
+    console.log("[ffmpeg] writing file, size:", inputData.byteLength);
     await ffmpegInstance.writeFile(inputName, inputData);
+    console.log("[ffmpeg] file written, running exec...");
 
-    // log ffmpeg output so we can see what's happening if it fails
-    ffmpegInstance.on("log", ({ message }) => console.log("[ffmpeg]", message));
-
-    // simple transpose=1 — rotates pixel data 90° clockwise to correct
-    // a phone video recorded in portrait mode (raw frames are landscape).
-    // -display_rotation was removed: it's not supported in ffmpeg.wasm's
-    // wasm build and caused the FS error (exec failed → output.mp4 never
-    // written → readFile threw). plain transpose is enough here.
-    await ffmpegInstance.exec([
+    const ret = await ffmpegInstance.exec([
       "-i", inputName,
       "-vf", "transpose=1",
       "-c:a", "copy",
       "output.mp4"
     ]);
+    console.log("[ffmpeg] exec returned:", ret);
 
-    // read the fixed video back out and hand it to the browser
+    console.log("[ffmpeg] reading output...");
     const outputData = await ffmpegInstance.readFile("output.mp4");
-    const outputBlob = new Blob([outputData.buffer], { type: "video/mp4" });
+
+    const outputBlob = new Blob([outputData], { type: "video/mp4" });
     const url = URL.createObjectURL(outputBlob);
 
     // clean up ffmpeg's virtual filesystem for next time
@@ -472,15 +472,7 @@ function boundingBoxFromLandmarks(landmarks, crop, vw, vh) {
 
 // ---- draw the skeleton overlay on top of the video ----
 //
-// IMPORTANT MIRROR NOTE: mediapipe hands back landmark x/y normalized to the
-// raw decoded video frame. that's NOT always the same orientation you see
-// on screen — plenty of phone-recorded "selfie" videos store frames
-// un-mirrored even though the phone's live preview mirrored them while you
-// were filming. there's no universal flag for this, so rather than guess,
-// we flip x consistently everywhere (drawing + direction math) to match
-// what's visually on screen. if your hand ever again looks correct in the
-// video but the dots float to the wrong side, this is the line to revisit.
-const MIRROR_X = true;
+const MIRROR_X = false;
 
 // remaps a single landmark point from crop-normalized space (0..1 within
 // the cropped/upscaled detection canvas) back to full-video-normalized
